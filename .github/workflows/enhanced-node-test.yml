@@ -1,137 +1,798 @@
 # .github/workflows/enhanced-node-test.yml
-
 # 增强版节点测试工作流，支持测速和流媒体解锁检测
 
 name: 🚀 Enhanced Node Testing & Update
 
 on:
-
-# 定时运行 - 每4小时（测试较耗时）
-
-schedule:
-- cron: ‘0 */4 * * *’  # 每4小时运行一次
-# - cron: ‘0 6,14,22 * * *’  # 每天6点、14点、22点运行
-
-# 手动运行
-
-workflow_dispatch:
-inputs:
-test_mode:
-description: ‘测试模式’
-required: false
-default: ‘full’
-type: choice
-options:
-- ‘basic’    # 基础连通性测试
-- ‘speed’    # 包含速度测试
-- ‘full’     # 完整测试（包含流媒体）
-max_nodes:
-description: ‘最大测试节点数’
-required: false
-default: ‘50’
-type: string
+  # 定时运行 - 每4小时（测试较耗时）
+  schedule:
+    - cron: '0 */4 * * *'  # 每4小时运行一次
+    # - cron: '0 6,14,22 * * *'  # 每天6点、14点、22点运行
+  
+  # 手动运行
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        description: '测试模式'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+        - 'basic'    # 基础连通性测试
+        - 'speed'    # 包含速度测试
+        - 'full'     # 完整测试（包含流媒体）
+      max_nodes:
+        description: '最大测试节点数'
+        required: false
+        default: '50'
+        type: string
 
 env:
-TZ: ‘Asia/Shanghai’
-PYTHONUNBUFFERED: ‘1’
+  TZ: 'Asia/Shanghai'
+  PYTHONUNBUFFERED: '1'
 
 jobs:
+  # 第一个任务：获取和解析节点
+  fetch-nodes:
+    runs-on: ubuntu-latest
+    outputs:
+      nodes-count: ${{ steps.parse.outputs.nodes-count }}
+      
+    steps:
+    - name: 📥 Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
 
-# 第一个任务：获取和解析节点
+    - name: 🐍 Setup Python Environment
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
 
-fetch-nodes:
-runs-on: ubuntu-latest
-outputs:
-nodes-count: ${{ steps.parse.outputs.nodes-count }}
+    - name: 📦 Install Dependencies
+      run: |
+        pip install --upgrade pip
+        pip install requests PyYAML aiohttp asyncio
 
-```
-steps:
-- name: 📥 Checkout Repository
-  uses: actions/checkout@v4
-  with:
-    token: ${{ secrets.GITHUB_TOKEN }}
-
-- name: 🐍 Setup Python Environment
-  uses: actions/setup-python@v4
-  with:
-    python-version: '3.11'
-    cache: 'pip'
-
-- name: 📦 Install Dependencies
-  run: |
-    pip install --upgrade pip
-    pip install requests PyYAML aiohttp asyncio
-
-- name: 🔄 Fetch and Parse Nodes
-  id: parse
-  env:
-    SUBSCRIPTION_URLS: ${{ secrets.SUBSCRIPTION_URLS }}
-  run: |
-    echo "📡 开始获取订阅节点..."
-    python3 << 'EOF'
-    import os
-    import json
-    import requests
-    import base64
-    from urllib.parse import urlparse, parse_qs, unquote
-    import re
-    import hashlib
-    
-    def fetch_subscription(url):
-        """获取订阅内容"""
-        try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            response = requests.get(url, headers=headers, timeout=15)
-            response.raise_for_status()
-            
-            content = response.text.strip()
+    - name: 🔄 Fetch and Parse Nodes
+      id: parse
+      env:
+        SUBSCRIPTION_URLS: ${{ secrets.SUBSCRIPTION_URLS }}
+      run: |
+        echo "📡 开始获取订阅节点..."
+        python3 << 'EOF'
+        import os
+        import json
+        import requests
+        import base64
+        from urllib.parse import urlparse, parse_qs, unquote
+        import re
+        import hashlib
+        
+        def fetch_subscription(url):
+            """获取订阅内容"""
             try:
-                decoded = base64.b64decode(content).decode('utf-8')
-                content = decoded
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+                response = requests.get(url, headers=headers, timeout=15)
+                response.raise_for_status()
+                
+                content = response.text.strip()
+                try:
+                    decoded = base64.b64decode(content).decode('utf-8')
+                    content = decoded
+                except:
+                    pass
+                
+                links = [line.strip() for line in content.split('\n') 
+                        if line.strip() and any(line.startswith(p) for p in ['vmess://', 'vless://', 'trojan://', 'ss://'])]
+                
+                print(f"从 {url[:50]}... 获取到 {len(links)} 个节点")
+                return links
+            except Exception as e:
+                print(f"获取订阅失败 {url}: {e}")
+                return []
+        
+        def parse_vmess(url):
+            """解析vmess节点"""
+            try:
+                data = json.loads(base64.b64decode(url[8:]).decode('utf-8'))
+                return {
+                    'protocol': 'vmess',
+                    'name': data.get('ps', ''),
+                    'server': data.get('add', ''),
+                    'port': int(data.get('port', 443)),
+                    'uuid': data.get('id', ''),
+                    'method': data.get('scy', 'auto'),
+                    'network': data.get('net', 'tcp'),
+                    'path': data.get('path', ''),
+                    'host': data.get('host', ''),
+                    'tls': data.get('tls', ''),
+                    'raw_url': url
+                }
             except:
-                pass
-            
-            links = [line.strip() for line in content.split('\n') 
-                    if line.strip() and any(line.startswith(p) for p in ['vmess://', 'vless://', 'trojan://', 'ss://'])]
-            
-            print(f"从 {url[:50]}... 获取到 {len(links)} 个节点")
-            return links
-        except Exception as e:
-            print(f"获取订阅失败 {url}: {e}")
-            return []
-    
-    def parse_vmess(url):
-        """解析vmess节点"""
-        try:
-            data = json.loads(base64.b64decode(url[8:]).decode('utf-8'))
-            return {
-                'protocol': 'vmess',
-                'name': data.get('ps', ''),
-                'server': data.get('add', ''),
-                'port': int(data.get('port', 443)),
-                'uuid': data.get('id', ''),
-                'method': data.get('scy', 'auto'),
-                'network': data.get('net', 'tcp'),
-                'path': data.get('path', ''),
-                'host': data.get('host', ''),
-                'tls': data.get('tls', ''),
-                'raw_url': url
-            }
-        except:
+                return None
+        
+        def parse_node(url):
+            """解析节点链接"""
+            if url.startswith('vmess://'):
+                return parse_vmess(url)
+            # 其他协议解析...
             return None
+        
+        def detect_country(server, name):
+            """检测国家"""
+            text = (server + ' ' + name).lower()
+        def detect_country(server, name):
+            """检测国家"""
+            text = (server + ' ' + name).lower()
+            countries = {
+                'HK': ['hk', 'hong-kong', 'hongkong', '香港'],
+                'TW': ['tw', 'taiwan', 'taipei', '台湾'],
+                'US': ['us', 'usa', 'america', 'united-states'],
+                'JP': ['jp', 'japan', 'tokyo', '日本'],
+                'SG': ['sg', 'singapore', '新加坡'],
+                'KR': ['kr', 'korea', 'seoul', '韩国']
+            }
+            
+            for code, keywords in countries.items():
+                if any(k in text for k in keywords):
+                    return code
+            return 'UN'
+        
+        # 主程序
+        env_subs = os.environ.get('SUBSCRIPTION_URLS', '')
+        if not env_subs:
+            print("❌ 未配置订阅链接")
+            exit(1)
+        
+        subscription_urls = [url.strip() for url in env_subs.split(',') if url.strip()]
+        print(f"📋 配置了 {len(subscription_urls)} 个订阅源")
+        
+        all_links = []
+        for url in subscription_urls:
+            links = fetch_subscription(url)
+            all_links.extend(links)
+        
+        print(f"📊 总共获取 {len(all_links)} 个原始节点")
+        
+        # 解析节点
+        nodes = []
+        for url in all_links:
+            node = parse_node(url)
+            if node and node['server'] and node['port']:
+                node['country'] = detect_country(node['server'], node['name'])
+                # 去重哈希
+                hash_str = f"{node['server']}:{node['port']}:{node['uuid']}"
+                node['hash'] = hashlib.md5(hash_str.encode()).hexdigest()
+                nodes.append(node)
+        
+        # 去重
+        seen_hashes = set()
+        unique_nodes = []
+        for node in nodes:
+            if node['hash'] not in seen_hashes:
+                seen_hashes.add(node['hash'])
+                unique_nodes.append(node)
+        
+        print(f"✅ 解析并去重后得到 {len(unique_nodes)} 个有效节点")
+        
+        # 限制测试数量（测试耗时较长）
+        max_test = int(os.environ.get('INPUT_MAX_NODES', '50'))
+        if len(unique_nodes) > max_test:
+            # 按国家优先级排序，优先测试亚洲节点
+            priority = {'HK': 1, 'TW': 2, 'SG': 3, 'JP': 4, 'KR': 5, 'US': 6}
+            unique_nodes.sort(key=lambda x: priority.get(x['country'], 99))
+            unique_nodes = unique_nodes[:max_test]
+            print(f"📊 限制测试节点数量为 {max_test}")
+        
+        # 保存节点数据
+        with open('raw_nodes.json', 'w', encoding='utf-8') as f:
+            json.dump(unique_nodes, f, ensure_ascii=False, indent=2)
+        
+        print(f"::set-output name=nodes-count::{len(unique_nodes)}")
+        print(f"✅ 节点获取完成，准备进行测试")
+        EOF
+
+    - name: 📤 Upload Raw Nodes
+      uses: actions/upload-artifact@v3
+      with:
+        name: raw-nodes
+        path: raw_nodes.json
+
+  # 第二个任务：节点连通性和速度测试
+  test-nodes:
+    runs-on: ubuntu-latest
+    needs: fetch-nodes
+    if: needs.fetch-nodes.outputs.nodes-count > 0
     
-    def parse_node(url):
-        """解析节点链接"""
-        if url.startswith('vmess://'):
-            return parse_vmess(url)
-        # 其他协议解析...
-        return None
+    steps:
+    - name: 📥 Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: 🐍 Setup Python Environment
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: 📦 Install Enhanced Dependencies
+      run: |
+        pip install --upgrade pip
+        pip install aiohttp asyncio requests PyYAML
+        # 安装额外的网络测试工具
+        sudo apt-get update
+        sudo apt-get install -y curl wget netcat-openbsd
+
+    - name: 📥 Download Raw Nodes
+      uses: actions/download-artifact@v3
+      with:
+        name: raw-nodes
+
+    - name: 🧪 Enhanced Node Testing
+      env:
+        TEST_MODE: ${{ github.event.inputs.test_mode || 'full' }}
+      run: |
+        echo "🧪 开始增强版节点测试..."
+        echo "测试模式: $TEST_MODE"
+        
+        python3 << 'EOF'
+        import asyncio
+        import aiohttp
+        import json
+        import time
+        import socket
+        import os
+        import subprocess
+        from concurrent.futures import ThreadPoolExecutor
+        
+        async def tcp_ping_test(host, port, timeout=5):
+            """TCP连接测试"""
+            try:
+                start_time = time.time()
+                _, writer = await asyncio.wait_for(
+                    asyncio.open_connection(host, port),
+                    timeout=timeout
+                )
+                ping_time = (time.time() - start_time) * 1000
+                writer.close()
+                await writer.wait_closed()
+                return True, ping_time
+            except:
+                return False, -1
+        
+        async def http_speed_test(session, test_url="http://www.gstatic.com/generate_204"):
+            """HTTP速度测试"""
+            try:
+                start_time = time.time()
+                async with session.get(test_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    await response.read()
+                    return (time.time() - start_time) * 1000
+            except:
+                return -1
+        
+        async def download_speed_test(session, size_mb=1):
+            """下载速度测试"""
+            try:
+                # 使用小文件测试，避免GitHub Actions超时
+                test_url = "https://proof.ovh.net/files/1Mb.dat"
+                start_time = time.time()
+                
+                async with session.get(test_url, timeout=aiohttp.ClientTimeout(total=15)) as response:
+                    if response.status == 200:
+                        downloaded = 0
+                        async for chunk in response.content.iter_chunked(8192):
+                            downloaded += len(chunk)
+                            # 限制测试时间
+                            if time.time() - start_time > 10:
+                                break
+                        
+                        elapsed = time.time() - start_time
+                        if elapsed > 0:
+                            speed_mbps = (downloaded / 1024 / 1024) / elapsed
+                            return speed_mbps
+                return 0
+            except:
+                return 0
+        
+        async def get_ip_info(session):
+            """获取IP信息"""
+            try:
+                async with session.get("https://httpbin.org/ip", 
+                                     timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return data.get("origin", "未知")
+                return "未知"
+            except:
+                return "检测失败"
+        
+        async def test_streaming_unlock(session):
+            """流媒体解锁测试（简化版）"""
+            results = {}
+            
+            # Netflix测试
+            try:
+                async with session.get("https://www.netflix.com/", 
+                                     timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status == 200:
+                        content = await response.text()
+                        if "Not Available" in content:
+                            results['netflix'] = "❌ 不支持"
+                        else:
+                            results['netflix'] = "✅ 可能支持"
+                    else:
+                        results['netflix'] = "❓ 检测失败"
+            except:
+                results['netflix'] = "❓ 超时"
+            
+            # YouTube测试
+            try:
+                async with session.get("https://www.youtube.com/", 
+                                     timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status == 200:
+                        results['youtube'] = "✅ 可访问"
+                    else:
+                        results['youtube'] = "❌ 无法访问"
+            except:
+                results['youtube'] = "❓ 超时"
+            
+            return results
+        
+        async def test_single_node(node, test_mode):
+            """测试单个节点"""
+            result = {
+                'name': node['name'],
+                'server': node['server'],
+                'port': node['port'],
+                'protocol': node['protocol'],
+                'country': node['country'],
+                'is_alive': False,
+                'tcp_ping': -1,
+                'http_ping': -1,
+                'download_speed': 0,
+                'ip_info': '未知',
+                'streaming': {},
+                'test_time': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'error': ''
+            }
+            
+            try:
+                print(f"🧪 测试节点: {node['name']}")
+                
+                # 1. TCP连接测试
+                is_alive, tcp_ping = await tcp_ping_test(node['server'], node['port'])
+                result['is_alive'] = is_alive
+                result['tcp_ping'] = tcp_ping
+                
+                if not is_alive:
+                    result['error'] = 'TCP连接失败'
+                    return result
+                
+                # 2. HTTP测试（如果节点存活）
+                connector = aiohttp.TCPConnector(limit=1, ttl_dns_cache=300)
+                async with aiohttp.ClientSession(connector=connector) as session:
+                    
+                    if test_mode in ['speed', 'full']:
+                        # HTTP延迟测试
+                        result['http_ping'] = await http_speed_test(session)
+                        
+                        # 下载速度测试
+                        result['download_speed'] = await download_speed_test(session)
+                    
+                    if test_mode == 'full':
+                        # IP信息获取
+                        result['ip_info'] = await get_ip_info(session)
+                        
+                        # 流媒体解锁测试
+                        result['streaming'] = await test_streaming_unlock(session)
+                
+                print(f"✅ 节点 {node['name']} 测试完成")
+                
+            except Exception as e:
+                result['error'] = str(e)
+                print(f"❌ 节点 {node['name']} 测试失败: {e}")
+            
+            return result
+        
+        async def main():
+            # 读取节点数据
+            with open('raw_nodes.json', 'r', encoding='utf-8') as f:
+                nodes = json.load(f)
+            
+            test_mode = os.environ.get('TEST_MODE', 'full')
+            print(f"📊 开始测试 {len(nodes)} 个节点，模式: {test_mode}")
+            
+            # 限制并发数，避免被封IP
+            semaphore = asyncio.Semaphore(3)
+            
+            async def test_with_limit(node):
+                async with semaphore:
+                    return await test_single_node(node, test_mode)
+            
+            # 执行测试
+            start_time = time.time()
+            results = await asyncio.gather(*[test_with_limit(node) for node in nodes])
+            elapsed = time.time() - start_time
+            
+            print(f"📊 测试完成，耗时 {elapsed:.2f} 秒")
+            
+            # 统计结果
+            alive_nodes = [r for r in results if r['is_alive']]
+            dead_nodes = [r for r in results if not r['is_alive']]
+            
+            stats = {
+                'test_time': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'test_mode': test_mode,
+                'total_nodes': len(results),
+                'alive_nodes': len(alive_nodes),
+                'dead_nodes': len(dead_nodes),
+                'success_rate': len(alive_nodes) / len(results) * 100 if results else 0,
+                'avg_tcp_ping': sum(r['tcp_ping'] for r in alive_nodes if r['tcp_ping'] > 0) / len(alive_nodes) if alive_nodes else 0,
+                'avg_download_speed': sum(r['download_speed'] for r in alive_nodes) / len(alive_nodes) if alive_nodes else 0
+            }
+            
+            # 地区统计
+            country_stats = {}
+            for result in alive_nodes:
+                country = result['country']
+                if country not in country_stats:
+                    country_stats[country] = {'total': 0, 'avg_ping': 0, 'avg_speed': 0}
+                country_stats[country]['total'] += 1
+            
+            # 保存详细结果
+            test_report = {
+                'stats': stats,
+                'country_stats': country_stats,
+                'results': results
+            }
+            
+            with open('test_results.json', 'w', encoding='utf-8') as f:
+                json.dump(test_report, f, ensure_ascii=False, indent=2)
+            
+            # 生成可用节点列表
+            working_nodes = [r for r in results if r['is_alive'] and r['tcp_ping'] < 1000]
+            working_nodes.sort(key=lambda x: x['tcp_ping'])
+            
+            print(f"📊 测试统计:")
+            print(f"  总节点数: {stats['total_nodes']}")
+            print(f"  可用节点: {stats['alive_nodes']}")
+            print(f"  成功率: {stats['success_rate']:.1f}%")
+            print(f"  平均延迟: {stats['avg_tcp_ping']:.1f}ms")
+            print(f"  平均速度: {stats['avg_download_speed']:.2f}MB/s")
+            
+            # 输出最佳节点
+            if working_nodes:
+                print(f"\n🏆 最佳节点 TOP 5:")
+                for i, node in enumerate(working_nodes[:5], 1):
+                    print(f"  {i}. {node['name']} - {node['tcp_ping']:.1f}ms")
+        
+        # 运行测试
+        asyncio.run(main())
+        EOF
+
+    - name: 📤 Upload Test Results
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-results
+        path: test_results.json
+
+  # 第三个任务：生成配置文件和部署
+  generate-configs:
+    runs-on: ubuntu-latest
+    needs: [fetch-nodes, test-nodes]
     
-    def detect_country(server, name):
-        """检测国家"""
-        text = (server + ' ' + name).lower()
-        countries = {
-            '
-```
+    steps:
+    - name: 📥 Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: 🐍 Setup Python Environment
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: 📥 Download Test Results
+      uses: actions/download-artifact@v3
+      with:
+        name: test-results
+
+    - name: 📥 Download Raw Nodes
+      uses: actions/download-artifact@v3
+      with:
+        name: raw-nodes
+
+    - name: 🔧 Generate Enhanced Configs
+      run: |
+        echo "🔧 生成增强版配置文件..."
+        
+        python3 << 'EOF'
+        import json
+        import base64
+        import time
+        
+        # 读取测试结果
+        with open('test_results.json', 'r', encoding='utf-8') as f:
+            test_data = json.load(f)
+        
+        with open('raw_nodes.json', 'r', encoding='utf-8') as f:
+            raw_nodes = json.load(f)
+        
+        results = test_data['results']
+        stats = test_data['stats']
+        
+        # 过滤可用节点
+        working_nodes = []
+        for result in results:
+            if result['is_alive'] and result['tcp_ping'] > 0 and result['tcp_ping'] < 2000:
+                # 找到对应的原始节点数据
+                for raw_node in raw_nodes:
+                    if (raw_node['server'] == result['server'] and 
+                        raw_node['port'] == result['port']):
+                        enhanced_node = raw_node.copy()
+                        enhanced_node.update({
+                            'test_result': result,
+                            'enhanced_name': f"[{result['tcp_ping']:.0f}ms] {result['name']}"
+                        })
+                        working_nodes.append(enhanced_node)
+                        break
+        
+        # 按延迟排序
+        working_nodes.sort(key=lambda x: x['test_result']['tcp_ping'])
+        
+        print(f"📊 生成配置，包含 {len(working_nodes)} 个优质节点")
+        
+        # 生成Clash配置
+        def generate_clash_config(nodes):
+            proxies = []
+            proxy_names = []
+            
+            for node in nodes:
+                name = node['enhanced_name']
+                proxy_names.append(name)
+                
+                if node['protocol'] == 'vmess':
+                    proxy = {
+                        'name': name,
+                        'type': 'vmess',
+                        'server': node['server'],
+                        'port': node['port'],
+                        'uuid': node['uuid'],
+                        'alterId': 0,
+                        'cipher': node.get('method', 'auto'),
+                        'network': node.get('network', 'tcp'),
+                        'udp': True
+                    }
+                    
+                    if node.get('tls'):
+                        proxy['tls'] = True
+                    if node.get('host'):
+                        proxy['servername'] = node['host']
+                    if node.get('path') and node.get('network') == 'ws':
+                        proxy['ws-opts'] = {'path': node['path']}
+                        if node.get('host'):
+                            proxy['ws-opts']['headers'] = {'Host': node['host']}
+                
+                proxies.append(proxy)
+            
+            # 按地区分组
+            country_groups = {}
+            for node in nodes:
+                country = node['country']
+                if country not in country_groups:
+                    country_groups[country] = []
+                country_groups[country].append(node['enhanced_name'])
+            
+            proxy_groups = [
+                {
+                    'name': '🚀 节点选择',
+                    'type': 'select',
+                    'proxies': ['♻️ 自动选择', '🔯 故障转移'] + proxy_names[:10]
+                },
+                {
+                    'name': '♻️ 自动选择',
+                    'type': 'url-test',
+                    'proxies': proxy_names,
+                    'url': 'http://www.gstatic.com/generate_204',
+                    'interval': 300,
+                    'tolerance': 50
+                },
+                {
+                    'name': '🔯 故障转移',
+                    'type': 'fallback',
+                    'proxies': proxy_names,
+                    'url': 'http://www.gstatic.com/generate_204',
+                    'interval': 300
+                }
+            ]
+            
+            # 添加地区分组
+            region_names = {
+                'HK': '🇭🇰香港节点', 'TW': '🇹🇼台湾节点', 'US': '🇺🇸美国节点',
+                'JP': '🇯🇵日本节点', 'SG': '🇸🇬新加坡节点', 'KR': '🇰🇷韩国节点'
+            }
+            
+            for country, nodes_list in country_groups.items():
+                if len(nodes_list) >= 2:
+                    group_name = region_names.get(country, f'{country}节点')
+                    proxy_groups.append({
+                        'name': group_name,
+                        'type': 'select',
+                        'proxies': ['♻️ 自动选择'] + nodes_list
+                    })
+            
+            return {
+                'proxies': proxies,
+                'proxy-groups': proxy_groups
+            }
+        
+        # 生成V2Ray订阅
+        def generate_v2ray_subscription(nodes):
+            links = [node['raw_url'] for node in nodes if node.get('raw_url')]
+            content = '\n'.join(links)
+            return base64.b64encode(content.encode('utf-8')).decode('utf-8')
+        
+        # 生成增强统计报告
+        def generate_enhanced_report():
+            return {
+                'last_update': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'test_summary': stats,
+                'quality_nodes': len(working_nodes),
+                'top_nodes': [
+                    {
+                        'name': node['name'],
+                        'country': node['country'],
+                        'ping': f"{node['test_result']['tcp_ping']:.1f}ms",
+                        'speed': f"{node['test_result']['download_speed']:.2f}MB/s" if node['test_result']['download_speed'] > 0 else "未测试"
+                    }
+                    for node in working_nodes[:10]
+                ],
+                'country_distribution': test_data.get('country_stats', {}),
+                'streaming_support': {
+                    node['name']: node['test_result'].get('streaming', {})
+                    for node in working_nodes[:5] 
+                    if node['test_result'].get('streaming')
+                }
+            }
+        
+        # 生成所有配置文件
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        
+        # Clash配置
+        clash_config = generate_clash_config(working_nodes)
+        try:
+            import yaml
+            clash_content = yaml.dump(clash_config, allow_unicode=True, default_flow_style=False)
+        except ImportError:
+            clash_content = json.dumps(clash_config, ensure_ascii=False, indent=2)
+        
+        with open(f'clash_enhanced_{timestamp}.yaml', 'w', encoding='utf-8') as f:
+            f.write(clash_content)
+        
+        # V2Ray订阅
+        v2ray_content = generate_v2ray_subscription(working_nodes)
+        with open(f'v2ray_enhanced_{timestamp}.txt', 'w', encoding='utf-8') as f:
+            f.write(v2ray_content)
+        
+        # 增强报告
+        report = generate_enhanced_report()
+        with open(f'enhanced_report_{timestamp}.json', 'w', encoding='utf-8') as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+        
+        # 创建latest软链接
+        import os
+        
+        def safe_symlink(src, dst):
+            if os.path.exists(dst):
+                os.remove(dst)
+            os.symlink(src, dst)
+        
+        safe_symlink(f'clash_enhanced_{timestamp}.yaml', 'clash_latest.yaml')
+        safe_symlink(f'v2ray_enhanced_{timestamp}.txt', 'v2ray_latest.txt') 
+        safe_symlink(f'enhanced_report_{timestamp}.json', 'report_latest.json')
+        
+        print(f"✅ 配置生成完成:")
+        print(f"  - Clash配置: clash_enhanced_{timestamp}.yaml")
+        print(f"  - V2Ray订阅: v2ray_enhanced_{timestamp}.txt")
+        print(f"  - 增强报告: enhanced_report_{timestamp}.json")
+        print(f"  - 优质节点数: {len(working_nodes)}")
+        EOF
+
+    - name: ⚙️ Configure Git
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "Enhanced Node Tester"
+
+    - name: 🧹 Cleanup Old Files
+      run: |
+        # 保留最近5个版本
+        ls -t clash_enhanced_*.yaml | tail -n +6 | xargs -r rm -f
+        ls -t v2ray_enhanced_*.txt | tail -n +6 | xargs -r rm -f
+        ls -t enhanced_report_*.json | tail -n +6 | xargs -r rm -f
+
+    - name: 📤 Commit Enhanced Results
+      run: |
+        git add *.yaml *.txt *.json || true
+        git commit -m "🤖 Enhanced node test results - $(date '+%Y-%m-%d %H:%M:%S')" || echo "No changes"
+        git push || echo "Nothing to push"
+
+    - name: 🌐 Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./
+        publish_branch: gh-pages
+        keep_files: false
+        include_files: |
+          *_latest.*
+          clash_enhanced_*.yaml
+          v2ray_enhanced_*.txt
+          enhanced_report_*.json
+
+    - name: 📊 Generate Summary
+      run: |
+        if [ -f "report_latest.json" ]; then
+          echo "## 🚀 增强版节点测试报告" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          python3 << 'EOF' >> $GITHUB_STEP_SUMMARY
+        import json
+        
+        with open('report_latest.json', 'r', encoding='utf-8') as f:
+            report = json.load(f)
+        
+        stats = report['test_summary']
+        
+        print(f"### 📈 测试统计")
+        print(f"- **更新时间**: {report['last_update']}")
+        print(f"- **总节点数**: {stats['total_nodes']}")
+        print(f"- **可用节点**: {stats['alive_nodes']}")
+        print(f"- **优质节点**: {report['quality_nodes']}")
+        print(f"- **成功率**: {stats['success_rate']:.1f}%")
+        print(f"- **平均延迟**: {stats['avg_tcp_ping']:.1f}ms")
+        print(f"- **平均速度**: {stats['avg_download_speed']:.2f}MB/s")
+        print()
+        
+        print("### 🏆 优质节点 TOP 5")
+        for i, node in enumerate(report['top_nodes'][:5], 1):
+            print(f"{i}. **{node['name']}** - {node['ping']} - {node['speed']}")
+        print()
+        
+        print("### 🔗 订阅链接")
+        repo_url = "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+        print(f"- **Clash增强版**: {repo_url}/clash_latest.yaml")
+        print(f"- **V2Ray增强版**: {repo_url}/v2ray_latest.txt")
+        print(f"- **详细报告**: {repo_url}/report_latest.json")
+        EOF
+        fi
+
+    - name: 📢 Send Notification
+      if: always()
+      env:
+        WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+      run: |
+        if [ ! -z "$WEBHOOK_URL" ]; then
+          STATUS_EMOJI="✅"
+          if [ "${{ job.status }}" != "success" ]; then
+            STATUS_EMOJI="❌"
+          fi
+          
+          QUALITY_NODES="0"
+          if [ -f "report_latest.json" ]; then
+            QUALITY_NODES=$(python3 -c "import json; print(json.load(open('report_latest.json'))['quality_nodes'])")
+          fi
+          
+          MESSAGE="$STATUS_EMOJI 增强版节点测试完成
+          
+📊 测试结果: ${{ needs.test-nodes.result }}
+🏆 优质节点: $QUALITY_NODES 个
+⏰ 测试时间: $(date '+%Y-%m-%d %H:%M:%S')
+🔗 仓库: ${{ github.repository }}
+🎯 运行ID: ${{ github.run_id }}"
+          
+          curl -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"text\": \"$MESSAGE\"}"
+        fi
+                '
