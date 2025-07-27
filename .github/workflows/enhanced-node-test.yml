@@ -1,1 +1,137 @@
+# .github/workflows/enhanced-node-test.yml
 
+# 增强版节点测试工作流，支持测速和流媒体解锁检测
+
+name: 🚀 Enhanced Node Testing & Update
+
+on:
+
+# 定时运行 - 每4小时（测试较耗时）
+
+schedule:
+- cron: ‘0 */4 * * *’  # 每4小时运行一次
+# - cron: ‘0 6,14,22 * * *’  # 每天6点、14点、22点运行
+
+# 手动运行
+
+workflow_dispatch:
+inputs:
+test_mode:
+description: ‘测试模式’
+required: false
+default: ‘full’
+type: choice
+options:
+- ‘basic’    # 基础连通性测试
+- ‘speed’    # 包含速度测试
+- ‘full’     # 完整测试（包含流媒体）
+max_nodes:
+description: ‘最大测试节点数’
+required: false
+default: ‘50’
+type: string
+
+env:
+TZ: ‘Asia/Shanghai’
+PYTHONUNBUFFERED: ‘1’
+
+jobs:
+
+# 第一个任务：获取和解析节点
+
+fetch-nodes:
+runs-on: ubuntu-latest
+outputs:
+nodes-count: ${{ steps.parse.outputs.nodes-count }}
+
+```
+steps:
+- name: 📥 Checkout Repository
+  uses: actions/checkout@v4
+  with:
+    token: ${{ secrets.GITHUB_TOKEN }}
+
+- name: 🐍 Setup Python Environment
+  uses: actions/setup-python@v4
+  with:
+    python-version: '3.11'
+    cache: 'pip'
+
+- name: 📦 Install Dependencies
+  run: |
+    pip install --upgrade pip
+    pip install requests PyYAML aiohttp asyncio
+
+- name: 🔄 Fetch and Parse Nodes
+  id: parse
+  env:
+    SUBSCRIPTION_URLS: ${{ secrets.SUBSCRIPTION_URLS }}
+  run: |
+    echo "📡 开始获取订阅节点..."
+    python3 << 'EOF'
+    import os
+    import json
+    import requests
+    import base64
+    from urllib.parse import urlparse, parse_qs, unquote
+    import re
+    import hashlib
+    
+    def fetch_subscription(url):
+        """获取订阅内容"""
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            response = requests.get(url, headers=headers, timeout=15)
+            response.raise_for_status()
+            
+            content = response.text.strip()
+            try:
+                decoded = base64.b64decode(content).decode('utf-8')
+                content = decoded
+            except:
+                pass
+            
+            links = [line.strip() for line in content.split('\n') 
+                    if line.strip() and any(line.startswith(p) for p in ['vmess://', 'vless://', 'trojan://', 'ss://'])]
+            
+            print(f"从 {url[:50]}... 获取到 {len(links)} 个节点")
+            return links
+        except Exception as e:
+            print(f"获取订阅失败 {url}: {e}")
+            return []
+    
+    def parse_vmess(url):
+        """解析vmess节点"""
+        try:
+            data = json.loads(base64.b64decode(url[8:]).decode('utf-8'))
+            return {
+                'protocol': 'vmess',
+                'name': data.get('ps', ''),
+                'server': data.get('add', ''),
+                'port': int(data.get('port', 443)),
+                'uuid': data.get('id', ''),
+                'method': data.get('scy', 'auto'),
+                'network': data.get('net', 'tcp'),
+                'path': data.get('path', ''),
+                'host': data.get('host', ''),
+                'tls': data.get('tls', ''),
+                'raw_url': url
+            }
+        except:
+            return None
+    
+    def parse_node(url):
+        """解析节点链接"""
+        if url.startswith('vmess://'):
+            return parse_vmess(url)
+        # 其他协议解析...
+        return None
+    
+    def detect_country(server, name):
+        """检测国家"""
+        text = (server + ' ' + name).lower()
+        countries = {
+            '
+```
