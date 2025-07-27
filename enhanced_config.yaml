@@ -1,1 +1,40 @@
+# enhanced_config.yaml
 
+# 增强版节点管理器配置文件
+
+# 支持测速、流媒体解锁检测、地区识别等高级功能
+
+# 基础设置
+
+basic_settings:
+
+# 输出格式: basic, enhanced, full
+
+output_format: “enhanced”
+
+# 最大处理节点数（测试耗时考虑）
+
+max_nodes: 100
+
+# 请求超时时间（秒）
+
+timeout: 15
+
+# 节点排序方式: ping, speed, country, quality
+
+sort_by: “quality”  # 综合质量排序
+
+# 测试配置
+
+testing:
+
+# 启用的测试模块
+
+modules:
+connectivity: true      # 连通性测试
+speed_test: true       # 速度测试
+streaming_test: true   # 流媒体解锁测试
+ip_detection: true     # IP地理位置检测
+latency_test: true     # 延迟测试
+
+# 
