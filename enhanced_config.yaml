@@ -1,40 +1,344 @@
 # enhanced_config.yaml
-
 # 增强版节点管理器配置文件
-
 # 支持测速、流媒体解锁检测、地区识别等高级功能
 
 # 基础设置
-
 basic_settings:
-
-# 输出格式: basic, enhanced, full
-
-output_format: “enhanced”
-
-# 最大处理节点数（测试耗时考虑）
-
-max_nodes: 100
-
-# 请求超时时间（秒）
-
-timeout: 15
-
-# 节点排序方式: ping, speed, country, quality
-
-sort_by: “quality”  # 综合质量排序
+  # 输出格式: basic, enhanced, full
+  output_format: "enhanced"
+  
+  # 最大处理节点数（测试耗时考虑）
+  max_nodes: 100
+  
+  # 请求超时时间（秒）
+  timeout: 15
+  
+  # 节点排序方式: ping, speed, country, quality
+  sort_by: "quality"  # 综合质量排序
 
 # 测试配置
-
 testing:
+  # 启用的测试模块
+  modules:
+    connectivity: true      # 连通性测试
+    speed_test: true       # 速度测试
+    streaming_test: true   # 流媒体解锁测试
+    ip_detection: true     # IP地理位置检测
+    latency_test: true     # 延迟测试
+  
+  # 并发测试设置
+  concurrency:
+    max_workers: 3         # 最大并发数（避免被限制）
+    batch_size: 10         # 批处理大小
+    delay_between_batches: 2  # 批次间延迟（秒）
+  
+  # 测试超时设置
+  timeouts:
+    tcp_connect: 10        # TCP连接超时
+    http_request: 15       # HTTP请求超时
+    speed_test: 30         # 速度测试超时
+    streaming_test: 20     # 流媒体测试超时
 
-# 启用的测试模块
+# 速度测试配置
+speed_test:
+  # 测试模式: light, standard, full
+  mode: "standard"
+  
+  # 测试文件大小配置
+  test_files:
+    small: "1MB"          # 小文件测试
+    medium: "5MB"         # 中等文件测试
+    large: "10MB"         # 大文件测试（仅在full模式）
+  
+  # 测试服务器
+  test_servers:
+    - "https://proof.ovh.net/files/"
+    - "http://speedtest.ftp.otenet.gr/files/"
+    - "https://mirror.init7.net/speedtest/"
+  
+  # 质量评分标准
+  quality_thresholds:
+    excellent: 
+      ping: 50           # ms
+      speed: 10          # MB/s
+    good:
+      ping: 150          # ms  
+      speed: 5           # MB/s
+    acceptable:
+      ping: 300          # ms
+      speed: 1           # MB/s
 
-modules:
-connectivity: true      # 连通性测试
-speed_test: true       # 速度测试
-streaming_test: true   # 流媒体解锁测试
-ip_detection: true     # IP地理位置检测
-latency_test: true     # 延迟测试
+# 流媒体解锁测试配置
+streaming_test:
+  # 启用的服务
+  services:
+    netflix: true
+    disney_plus: true
+    youtube_premium: true
+    hbo_max: true
+    prime_video: true
+    bilibili: true        # 哔哩哔哩港澳台
+    bahamut: true         # 巴哈姆特动画疯
+    abema: true           # AbemaTV
+    tvb: true             # TVB Anywhere+
+    viu: true             # Viu
+  
+  # 测试地区偏好
+  region_preference:
+    - "HK"  # 香港
+    - "TW"  # 台湾
+    - "JP"  # 日本
+    - "SG"  # 新加坡
+    - "US"  # 美国
+  
+  # 解锁状态标记
+  status_indicators:
+    full_support: "✅ 完整支持"
+    partial_support: "⚠️ 部分支持"
+    no_support: "❌ 不支持"
+    test_failed: "❓ 检测失败"
+    timeout: "⏱️ 超时"
 
-# 
+# 地区检测配置
+region_detection:
+  # 启用IP数据库
+  ip_databases:
+    - "ipapi.co"
+    - "ip-api.com"
+    - "ipinfo.io"
+    - "httpbin.org"
+  
+  # 地区映射
+  country_mapping:
+    # 亚洲地区
+    HK: "🇭🇰香港"
+    TW: "🇹🇼台湾" 
+    JP: "🇯🇵日本"
+    SG: "🇸🇬新加坡"
+    KR: "🇰🇷韩国"
+    MY: "🇲🇾马来西亚"
+    TH: "🇹🇭泰国"
+    IN: "🇮🇳印度"
+    
+    # 欧美地区
+    US: "🇺🇸美国"
+    CA: "🇨🇦加拿大"
+    GB: "🇬🇧英国"
+    DE: "🇩🇪德国"
+    FR: "🇫🇷法国"
+    NL: "🇳🇱荷兰"
+    RU: "🇷🇺俄罗斯"
+    
+    # 其他地区
+    AU: "🇦🇺澳洲"
+    BR: "🇧🇷巴西"
+    TR: "🇹🇷土耳其"
+  
+  # 地区关键词检测
+  keywords:
+    HK: ["hk", "hong-kong", "hongkong", "香港", "hkg", "852"]
+    TW: ["tw", "taiwan", "taipei", "台湾", "台北", "tpe", "886"]
+    JP: ["jp", "japan", "tokyo", "osaka", "日本", "东京", "nrt", "kix", "81"]
+    SG: ["sg", "singapore", "新加坡", "sin", "65"]
+    US: ["us", "usa", "america", "united-states", "美国", "纽约", "洛杉矶", "1"]
+
+# 节点命名规则
+naming:
+  # 命名模板: {region} {name} {quality} {index}
+  template: "[{ping}ms] {region} {name} {index:02d}"
+  
+  # 质量标识
+  quality_tags:
+    excellent: "⚡"
+    good: "🚀" 
+    acceptable: "📶"
+    poor: "🐌"
+  
+  # 特殊标记
+  special_tags:
+    netflix: "🎬"
+    disney: "🏰"
+    streaming: "📺"
+    gaming: "🎮"
+    ai: "🤖"
+
+# 输出配置
+output:
+  # Clash配置增强
+  clash:
+    # 自动生成代理组
+    auto_groups: true
+    
+    # 代理组配置
+    proxy_groups:
+      - name: "🚀 节点选择"
+        type: "select" 
+        include_auto: true
+        include_fallback: true
+        max_proxies: 20
+      
+      - name: "♻️ 自动选择"
+        type: "url-test"
+        test_url: "http://www.gstatic.com/generate_204"
+        interval: 300
+        tolerance: 50
+      
+      - name: "🔯 故障转移"
+        type: "fallback"
+        test_url: "http://www.gstatic.com/generate_204"
+        interval: 300
+      
+      - name: "🎬 流媒体"
+        type: "select"
+        filter: "netflix|disney|hbo"
+      
+      - name: "🎮 游戏加速"
+        type: "select"
+        filter: "gaming|game"
+        sort_by: "ping"
+    
+    # 地区分组
+    region_groups:
+      enable: true
+      min_nodes: 2          # 最少节点数才创建分组
+      auto_fallback: true   # 自动添加故障转移
+  
+  # 订阅链接增强
+  subscription:
+    # 添加节点标签
+    add_tags: true
+    
+    # 按质量排序
+    sort_by_quality: true
+    
+    # 过滤低质量节点
+    filter_poor_nodes: true
+    
+    # 最大节点数
+    max_nodes: 200
+
+# 监控和通知
+monitoring:
+  # 启用健康检查
+  health_check: true
+  
+  # 检查间隔（分钟）
+  check_interval: 60
+  
+  # 告警阈值
+  alert_thresholds:
+    min_alive_rate: 70     # 最低存活率 (%)
+    max_avg_ping: 500      # 最大平均延迟 (ms)
+    min_avg_speed: 1       # 最低平均速度 (MB/s)
+  
+  # 通知渠道
+  notifications:
+    webhook:
+      enabled: false
+      url: ""              # Webhook地址
+    
+    telegram:
+      enabled: false
+      bot_token: ""        # Bot Token
+      chat_id: ""          # 聊天ID
+    
+    email:
+      enabled: false
+      smtp_server: ""
+      username: ""
+      password: ""
+      recipients: []
+
+# GitHub Actions特殊配置
+github_actions:
+  # 工作流优化
+  workflow:
+    # 缓存设置
+    enable_cache: true
+    cache_duration: "1h"
+    
+    # 并发限制（避免资源耗尽）
+    max_concurrent_jobs: 2
+    
+    # 失败重试
+    retry_on_failure: true
+    max_retries: 2
+  
+  # 部署设置
+  deployment:
+    # 自动部署到GitHub Pages
+    auto_deploy: true
+    
+    # 保留文件版本数
+    keep_versions: 5
+    
+    # 生成监控页面
+    generate_dashboard: true
+    
+    # 创建API接口
+    create_api: true
+
+# 高级过滤规则
+filtering:
+  # 节点名称过滤
+  name_filters:
+    exclude_keywords:
+      - "剩余"
+      - "到期"
+      - "官网"
+      - "测试"
+      - "流量"
+      - "重置"
+      - "QQ群"
+      - "TG群"
+    
+    include_keywords:
+      - "Premium"
+      - "Pro"
+      - "Plus"
+      - "VIP"
+  
+  # 服务器过滤
+  server_filters:
+    # 排除的IP段
+    exclude_cidrs:
+      - "192.168.0.0/16"   # 私有地址
+      - "10.0.0.0/8"       # 私有地址
+      - "172.16.0.0/12"    # 私有地址
+    
+    # 排除的端口
+    exclude_ports:
+      - 22                 # SSH
+      - 3389               # RDP
+      - 1080               # SOCKS
+  
+  # 质量过滤
+  quality_filters:
+    # 最小要求
+    min_requirements:
+      ping: 1000           # 最大延迟 (ms)
+      success_rate: 50     # 最低成功率 (%)
+      speed: 0.1           # 最低速度 (MB/s)
+    
+    # 自动淘汰规则
+    auto_removal:
+      consecutive_failures: 3   # 连续失败次数
+      low_speed_threshold: 0.05 # 低速阈值 (MB/s)
+
+# 实验性功能
+experimental:
+  # AI智能优化
+  ai_optimization:
+    enabled: false
+    model: "simple"      # simple, advanced
+    
+  # 机器学习节点质量预测
+  ml_prediction:
+    enabled: false
+    training_data_days: 7
+    
+  # 自适应测试频率
+  adaptive_testing:
+    enabled: false
+    base_interval: 4     # 小时
+    quality_factor: true # 根据质量调整频率
