@@ -1,0 +1,47 @@
+name: ⚙️ Generate Configs Only
+
+on:
+  workflow_dispatch:
+
+env:
+  TZ: 'Asia/Shanghai'
+
+jobs:
+  generate-configs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: test-results
+
+      - name: Download Nodes
+        uses: actions/download-artifact@v3
+        with:
+          name: raw-nodes
+
+      - name: Generate Output
+        run: |
+          python3 scripts/generate_configs.py
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+          publish_branch: gh-pages
+          keep_files: false
+          include_files: |
+            *_latest.*
+            clash_enhanced_*.yaml
+            v2ray_enhanced_*.txt
+            enhanced_report_*.json
